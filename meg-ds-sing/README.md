@@ -76,7 +76,7 @@ Convert data to Megatron-DeepSpeed binary format on compute node.
 This takes about 30 minutes.
 
 ```
-./cpu-interactive.sh
+./gpu-interactive.sh
 
 source /opt/miniconda3/bin/activate pytorch
 
