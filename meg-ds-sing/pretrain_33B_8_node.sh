@@ -1,18 +1,20 @@
 #!/bin/bash
 
-#SBATCH --exclude=nid006865,nid005613,nid005988
-#SBATCH --nodes=8
+#SBATCH --nodes=128
 #SBATCH --ntasks-per-node=8
-##SBATCH --cpus-per-task=8
 #SBATCH --mem=0
 #SBATCH --partition=standard-g
-#SBATCH --time=0-00:30:00
+#SBATCH --time=2-00:00:00
 #SBATCH --gpus-per-node=mi250:8
 #SBATCH --exclusive=user
 #SBATCH --hint=nomultithread
-#SBATCH --account=project_462000273
+#SBATCH --account=project_462000319
 #SBATCH --output=logs/%j.out
 #SBATCH --error=logs/%j.err
+
+mkdir -p workdir
+wd=$(realpath workdir)
+
 
 # if run without sbatch, invoke here
 if [ -z $SLURM_JOB_ID ]; then
@@ -20,6 +22,12 @@ if [ -z $SLURM_JOB_ID ]; then
     sbatch "$0"
     exit
 fi
+
+# debugging (noisy)
+#export NCCL_DEBUG=INFO
+#export RCCL_KERNEL_COLL_TRACE_ENABLE=1 
+#export NCCL_DEBUG_SUBSYS=INIT,COLL
+#export NCCL_DEBUG_SUBSYS=INIT
 
 # distributed setup
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
@@ -32,8 +40,7 @@ export CXX=g++-10
 
 # singularity setup
 CONTAINER="pytorch-lumi_sles-rocm-5.5.1-python-3.10-pytorch-v2.0.1-apex-torchvision-torchdata-torchtext-torchaudio.sif"
-
-SING_BIND="/scratch/project_462000273,/flash/project_462000273"
+SING_BIND="/scratch/project_462000319,/flash/project_462000319"
 
 #export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/lib"
 
@@ -49,33 +56,42 @@ set -euo pipefail
 ln -f -s $SLURM_JOB_ID.out logs/latest.out
 ln -f -s $SLURM_JOB_ID.err logs/latest.err
 
-CHECKPOINT_PATH=checkpoints
-TENSORBOARD_PATH=tensorboard
+CHECKPOINT_PATH=/flash/project_462000319/megatron-33B-checkpoints
+TENSORBOARD_PATH="tensorboard/$SLURM_JOB_ID"
 #rm -rf "$CHECKPOINT_PATH" "$TENSORBOARD_PATH" # Start from scratch
 
 # Data
 TRAIN_DATA_PATH="train-data.txt"
 VALID_DATA_PATH="validation-data.txt"
-TOKENIZER_PATH="tokenizer"
+TOKENIZER_PATH="/scratch/project_462000319/tokenizers/tokenizer_v6_fixed_fin/"
 
 PP_SIZE=4
 TP_SIZE=2
 
-MICRO_BATCH_SIZE=2
-GLOBAL_BATCH_SIZE=1024
+MICRO_BATCH_SIZE=1
+GLOBAL_BATCH_SIZE=2048
 
-TRAIN_SAMPLES=146_500_000
+# export MEMORY_OPT_ALLREDUCE_SIZE=2500000000
+export MEMORY_OPT_ALLREDUCE_SIZE=1500000000
+echo "MEMORY_OPT_ALLREDUCE_SIZE $MEMORY_OPT_ALLREDUCE_SIZE"
+TRAIN_SAMPLES=488_281_250
 TRAIN_SAMPLES=${TRAIN_SAMPLES//_}    # drop "_" for bash math
 LR_DECAY_SAMPLES=$TRAIN_SAMPLES
 LR_WARMUP_SAMPLES=$((TRAIN_SAMPLES/100))
 
-NLAYERS=60
-NHIDDEN=6656
-NHEADS=52
+NLAYERS=54
+NHIDDEN=7168
+NHEADS=56
 FFN_HIDDEN_SIZE=$((4*NHIDDEN))
 SEQ_LEN=2048
 
-SAVE_INTERVAL=1000
+
+SAVE_INTERVAL=144
+LOG_INTERVAL=10
+
+EVAL_INTERVAL=600
+EVAL_STEPS=100
+
 OPTIMIZER_ARGS=" \
     --optimizer adam \
     --adam-beta1 0.9 \
@@ -100,9 +116,8 @@ GPT_ARGS=" \
     --micro-batch-size $MICRO_BATCH_SIZE \
     --global-batch-size $GLOBAL_BATCH_SIZE \
     --train-samples $TRAIN_SAMPLES \
-    --tokenizer-type GPT2BPETokenizer \
-    --vocab-file vocab.json \
-    --merge-file merges.txt \
+    --tokenizer-type PretrainedFromHF\
+    --tokenizer-name-or-path $TOKENIZER_PATH \
     --init-method-std 0.0048 \
     --embed-layernorm \
     --sync-tp-duplicated-parameters \
@@ -115,10 +130,10 @@ GPT_ARGS=" \
     "
 
 OUTPUT_ARGS=" \
-    --log-interval 1 \
+    --log-interval $LOG_INTERVAL \
     --save-interval $SAVE_INTERVAL \
-    --eval-interval 100 \
-    --eval-iters 100 \
+    --eval-interval $EVAL_INTERVAL \
+    --eval-iters $EVAL_STEPS \
     --tensorboard-dir $TENSORBOARD_PATH \
     --tensorboard-queue-size 5 \
     --log-timers-to-tensorboard \
@@ -154,7 +169,7 @@ DEEPSPEED_ARGS=" \
     "
 
 CMD=" \
-    Megatron-DeepSpeed/pretrain_gpt.py \
+    pretrain_gpt.py \
     --tensor-model-parallel-size $TP_SIZE \
     --pipeline-model-parallel-size $PP_SIZE \
     $GPT_ARGS \
@@ -185,10 +200,21 @@ echo $CMD
 
 echo "START $SLURM_JOBID: $(date)"
 
+if [ ! -d $wd/cray-deps ] ; then
+  rm -rf $wd/cray-deps
+  mkdir $wd/cray-deps
+  cp /usr/lib64/libcxi* $wd/cray-deps
+fi
+
 srun \
     --label \
     --cpu-bind=mask_cpu:$BIND_MASK \
-    singularity exec -B "$SING_BIND" "$CONTAINER" \
+    singularity exec \
+    -B /opt/cray:/opt/cray \
+    -B $wd/cray-deps:/opt/cray-deps \
+    -B $wd:/workdir \
+    -B "$SING_BIND" \
+    "$CONTAINER" \
     ./launch.sh \
     $CMD
 
