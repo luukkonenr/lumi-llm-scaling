@@ -36,7 +36,7 @@ singularity pull docker://sfantao/pytorch-lumi:sles-rocm-5.5.1-python-3.10-pytor
 Install python packages to userspace
 
 ```
-./cpu-interactive.sh
+./gpu-interactive.sh
 
 source /opt/miniconda3/bin/activate pytorch
 
