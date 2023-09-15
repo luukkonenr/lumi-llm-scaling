@@ -64,7 +64,7 @@ Download data in JSONL format
 wget https://a3s.fi/lumi-llm-scaling/wikipedia_20220301.en.train.jsonl
 wget https://a3s.fi/lumi-llm-scaling/wikipedia_20220301.en.valid.jsonl
 ```
-
+#### Using Megatron-tokenizer format
 Download tokenizer
 
 ```
@@ -92,9 +92,46 @@ for f in wikipedia_20220301.en.{train,valid}.jsonl; do
         --append-eod \
         --workers 128
 done
+```
+
+#### Using transformers-library tokenizer
+
+Convert data to Megatron-DeepSpeed binary format on compute node.
+This takes about 30 minutes.
+
+```
+./cpu-interactive.sh
+
+source /opt/miniconda3/bin/activate pytorch
+TOKENIZER="TurkuNLP/gpt3-finnish-small" # any HF-model name or local tokenizer path will do
+
+mkdir data
+for f in wikipedia_20220301.en.{train,valid}.jsonl; do
+    python Megatron-DeepSpeed/tools/preprocess_data.py \
+        --input $f \
+        --output data/$(basename $f .jsonl) \
+        --dataset-impl mmap \
+        --tokenizer-type PretrainedFromHF \
+        --tokenizer-name-or-path $TOKENIZER \
+        --append-eod \
+        --workers 128
+done
 
 exit
 ```
+####
+
+Create train-data.txt like the following format. 
+
+Syntax: `<dataset_name>: <weight_of_the_file_in_whole_resulting_dataset> <from:to>(meaning sampling from 0% of the file to 100% of the file)`
+
+Note: You need to insert a newline after the last double quote or you'll get an error.
+
+```
+"train: 0.5415810341 0:1 /flash/project_462000319/megatron-preprocessed-data/train/merged_slimpajama, 0.1304808053 0:1 /flash/project_462000319/megatron-preprocessed-data/train/merged_finnish, 0.004023063515 0:1 /flash/project_462000319/megatron-preprocessed-data/train/tatoeba-train.en-fi.jsonl_text_document, 0.004016818638 0:1 /flash/project_462000319/megatron-preprocessed-data/train/tatoeba-train.fi-en.jsonl_text_document, 0.3153543717 0:1 /flash/project_462000319/megatron-preprocessed-data/train/starcoder-merged, 0.004543906834 0:1 /flash/project_462000319/megatron-preprocessed-data/train/train-books_text_document"
+
+```
+
 
 **TODO: move data to flash, read from there**
 
