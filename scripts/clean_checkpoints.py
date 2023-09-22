@@ -44,15 +44,6 @@ def get_cps_to_backup(backup_dir, cp_dir, backup_interval):
             latest_step = curr_step
     
     return cps_to_backup
-        # t1 = datetime.fromtimestamp(cp.stat().st_mtime)
-        # print(cp.name, t1)
-        # t2 = dt_latest_backup
-        # if (t1-t2).seconds > 86000:
-        #     print(cp.name)
-        #     assert False
-
-
-
 
 
 def get_sorted_checkpoints(checkpoint_dir):
@@ -69,8 +60,8 @@ def main():
     print()
     ap = ArgumentParser()
     ap.add_argument("checkpoint_dir", help="Location of checkpoint directory with checkpoint files in format 'global_stepXXX'")
-    ap.add_argument("--backup_dir", help="Location of checpoints in scratch.", default="/scratch/project_462000319/checkpoint-backups/backups-33B-fixed")
-    ap.add_argument("--backup_interval", type=int, help="Interval of steps between copying checkpoint from flash to scratch. Save interval 144 makes it 2300.", default=2300)
+    ap.add_argument("--backup_dir", required=True, help="Location of checpoints in scratch.")
+    ap.add_argument("--backup_interval", default=2300, type=int, help="Interval of steps between copying checkpoint from flash to scratch. Save interval 144 makes it 2300.")
     ap.add_argument("--cps_to_keep", default=5, type=int, help="How many of the latest checkpoints to keep")
     args = ap.parse_args()
 
@@ -97,10 +88,6 @@ def main():
         raise IndexError(f"Asked to keep {args.cps_to_keep} of the latest checkpoints, found {len(cps_to_keep)}.\nPlease check your arguments!\n")
     
 
-    
-    ### Check latest backup checkpoint
-    ### Report how many steps ahead checkpoint_dir is
-    ### Ask if want to store a copy of a checkpoint
     cps_to_backup = get_cps_to_backup(args.backup_dir, args.checkpoint_dir, args.backup_interval)
     user_backup_input = None
     user_delete_option = None
